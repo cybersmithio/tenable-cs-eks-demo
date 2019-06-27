@@ -2,7 +2,6 @@
 
 import argparse
 import subprocess
-import re
 import time
 import boto3
 import sys
@@ -371,7 +370,7 @@ parser.add_argument('--eksclustername', help="The name of the EKS cluster",nargs
 parser.add_argument('--wngstackname', help="The name of the worker node group stack",nargs=1,action="store",default=["tenable-eks-cs-demo-worker-nodes"])
 parser.add_argument('--wngname', help="The name of the worker node group",nargs=1,action="store",default=["tenable-eks-cs-demo-worker-nodegroup"])
 parser.add_argument('--wngyamlfile', help="The YAML file defining the workernodegroup ",nargs=1,action="store",default=[None])
-parser.add_argument('--sshkeypair', help="The name of the SSH keypair to use for worker node communication ",nargs=1,action="store",default=[None])
+parser.add_argument('--ec2keypairname', help="The name of the EC2 keypair to use for SSH worker node communication ",nargs=1,action="store",default=["tenable-eks-demo-keypair"])
 parser.add_argument('--sshprivatekey', help="The file name of the SSH private key on your system",nargs=1,action="store",default=[None])
 parser.add_argument('--agentkey', help="The Tenable.io agent linking key ",nargs=1,action="store",default=[None])
 parser.add_argument('--agentgroup', help="The Tenable.io agent group for the agents ",nargs=1,action="store",default=[None])
@@ -426,7 +425,7 @@ if CREATEWORKERS:
     if args.wngyamlfile[0] == None:
         print("Need YAML file to create worker nodegroup stack")
         exit(-1)
-    if args.sshkeypair[0] == None:
+    if args.ec2keypairname[0] == None:
         print("Need SSH Keypair for worker nodegroup stack")
         exit(-1)
 
@@ -470,7 +469,7 @@ if CREATEEKS:
     writeKubeConfigEKS(eksca,eksendpoint,args.eksclustername[0],HOMEDIR)
 
 if CREATEWORKERS:
-    createWorkNodeStack(cf,args.wngstackname[0],args.wngname[0],args.wngyamlfile[0],vpc,sg,subnets,args.sshkeypair[0])
+    createWorkNodeStack(cf,args.wngstackname[0],args.wngname[0],args.wngyamlfile[0],vpc,sg,subnets,args.ec2keypairname[0])
     (wngrolearn) = getWorkerNodeStackInfo(cf, args.wngstackname[0])
     writeAWSAuthYAML(wngrolearn)
     applyAWSAuthYAML()
