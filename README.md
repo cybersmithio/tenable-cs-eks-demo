@@ -24,10 +24,19 @@ Create keypair called EKS-course-keypair
 Create API keys for user
 
 
+# Prerequisites:
+Need SSH keypair created
+Need a role to manage AWS resources
+Need user created for managing EKS and all the infrastructure
+Need API keys for the above user
+Need kubectl installed on your system
+Need aws-iam-authenicator installed on your system
+
 
 
 # Example
 export ROLEARN=arn:aws:iam::0000000000:role/EKS-course-role
 export AGENTKEY=****************************
-./build.py --stackname tenable-eks-cs-demo-stack --stackyamlfile tenable-cs-eks-demo-vpc.yaml --rolearn $ROLEARN --wngyamlfile tenable-cs-eks-demo-nodegroup.yaml --sshkeypair EKS-course-keypair --sshprivatekey ~/.ssh/aws-eks-course-cybersmith-keypair.pem --agentkey $AGENTKEY --agentgroup "AWS EKS Worker Nodes"
+python3 ./build.py --stackname tenable-eks-cs-demo-stack --stackyamlfile tenable-cs-eks-demo-vpc.yaml --rolearn $ROLEARN --wngyamlfile tenable-cs-eks-demo-nodegroup.yaml --sshkeypair EKS-course-keypair --sshprivatekey ~/.ssh/aws-eks-course-cybersmith-keypair.pem --agentkey $AGENTKEY --agentgroup "AWS EKS Worker Nodes"
 
+python3 ./delete.py --sshprivatekey ~/.ssh/aws-eks-course-cybersmith-keypair.pem

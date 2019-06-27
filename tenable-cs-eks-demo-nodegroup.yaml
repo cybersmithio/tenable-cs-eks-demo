@@ -118,7 +118,7 @@ Parameters:
   ClusterName:
     Description: The cluster name provided when the cluster was created. If it is incorrect, nodes will not be able to join the cluster.
     Type: String
-    Default: Tenable-EKS-CS-demo-cluster
+    Default: tenable-eks-cs-demo-eks-cluster
 
   BootstrapArguments:
     Description: Arguments to pass to the bootstrap script. See files/bootstrap.sh in https://github.com/awslabs/amazon-eks-ami
@@ -217,6 +217,18 @@ Resources:
       IpProtocol: '-1'
       FromPort: 0
       ToPort: 65535
+
+  NodeSecurityGroupForSSH:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: NodeSecurityGroup
+    Properties:
+      Description: Allow SSH to the worker nodes for installation of Nessus agents
+      GroupId: !Ref NodeSecurityGroup
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: "0.0.0.0/0"
+
 
   NodeSecurityGroupFromControlPlaneIngress:
     Type: AWS::EC2::SecurityGroupIngress

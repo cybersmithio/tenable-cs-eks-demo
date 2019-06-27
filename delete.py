@@ -37,7 +37,7 @@ def deleteStack(stackname):
     try:
         output=subprocess.check_output(command,shell=True)
     except:
-        print("Error creating stack file")
+        print("Error deleting stack")
         return(False)
     print("Output: ",output)
 
@@ -46,7 +46,7 @@ def deleteStack(stackname):
     try:
         output=subprocess.check_output(command,shell=True)
     except:
-        print("Error creating stack file")
+        print("Error deleting stack")
         return(False)
     print("Output: ",output)
 
@@ -55,17 +55,26 @@ def deleteStack(stackname):
 
 def listEC2InstanceIPaddresses(ec2,eksclustername,wngname):
     ipaddrs=[]
+    print("\n\nLooking for EC2 instances with name",str(eksclustername)+"-"+str(wngname)+"-Node")
     instance = ec2.describe_instances(Filters=[{"Name": "tag:Name", "Values": [str(eksclustername)+"-"+str(wngname)+"-Node"]}])
-    for i in instance['Reservations']:
-        print(i['Instances'][0]['NetworkInterfaces'][0]['Association']['PublicIp'])
-        ipaddrs.append(i['Instances'][0]['NetworkInterfaces'][0]['Association']['PublicIp'])
-
+    print("\n\n\n***Instances Found:",instance,"\n\n\n")
+    for r in instance['Reservations']:
+        for i in r['Instances']:
+            try:
+                pubip=i['NetworkInterfaces'][0]['Association']['PublicIp']
+                print(pubip)
+                ipaddrs.append(str(pubip))
+            except:
+                print("No public network interface for this instance")
     return(ipaddrs)
 
 
 
+
 def removeNessusAgent(sshprivatekey,ipaddrs):
+    print("Removing Nessus Agents from worker nodes")
     for ipaddress in ipaddrs:
+        print("Removing Nessus Agent from",ipaddress)
 
         #Link the agent
         command="ssh -o StrictHostKeyChecking=no -i "+str(sshprivatekey)+" ec2-user@"+str(ipaddress)+ \
@@ -74,9 +83,46 @@ def removeNessusAgent(sshprivatekey,ipaddrs):
         try:
             output=subprocess.check_output(command,shell=True)
         except:
-            print("Error creating stack file")
+            print("Error removing Nessus Agents")
             return(False)
         print("Output: "+str(output))
+
+
+def deletingGuestbook():
+
+    print("Deleting guestbook frontend")
+    command="kubectl delete -f guestbook-frontend.yaml"
+    print("Command:"+command)
+    try:
+        output=subprocess.check_output(command,shell=True)
+    except:
+        print("Error deleting stack file")
+        return(False)
+    print("Output: "+str(output))
+
+    print("Deleting redis slaves")
+    command="kubectl delete -f redis-slaves.yaml"
+    print("Command:"+command)
+    try:
+        output=subprocess.check_output(command,shell=True)
+    except:
+        print("Error deleting stack file")
+        return(False)
+    print("Output: "+str(output))
+
+
+    print("Deleting redis master")
+    command="kubectl delete -f redis-master.yaml"
+    print("Command:"+command)
+    try:
+        output=subprocess.check_output(command,shell=True)
+    except:
+        print("Error deleting stack file")
+        return(False)
+    print("Output: "+str(output))
+
+
+
 
 
 
@@ -84,7 +130,7 @@ def removeNessusAgent(sshprivatekey,ipaddrs):
 # Start of program
 ################################################################
 parser = argparse.ArgumentParser(description="Creates EKS environment to demonstration Tenable Container Security")
-parser.add_argument('--stackname', help="The name of the stack ",nargs=1,action="store",default="tenable-eks-cs-demo-stack")
+parser.add_argument('--stackname', help="The name of the stack ",nargs=1,action="store",default=["tenable-eks-cs-demo-stack"])
 parser.add_argument('--eksclustername', help="The name of the EKS cluster",nargs=1,action="store",default=["tenable-eks-cs-demo-eks-cluster"])
 parser.add_argument('--wngstackname', help="The name of the worker node group stack",nargs=1,action="store",default=["tenable-eks-cs-demo-worker-nodes"])
 parser.add_argument('--wngname', help="The name of the worker node group",nargs=1,action="store",default=["tenable-eks-cs-demo-worker-nodegroup"])
@@ -94,15 +140,10 @@ args = parser.parse_args()
 
 ec2 = boto3.client('ec2')
 
-
-if deleteEKS(args.eksclustername[0]) == False:
+if deletingGuestbook() == False:
     exit(-1)
 
-if deleteStack(args.stackname[0]) == False:
-    exit(-1)
-exit(0)
-
-ipaddrs=listEC2InstanceIPaddresses(ec2,"Tenable-EKS-CS-demo-cluster",args.wngname[0])
+ipaddrs=listEC2InstanceIPaddresses(ec2,args.eksclustername[0],args.wngname[0])
 
 removeNessusAgent(args.sshprivatekey[0],ipaddrs)
 
