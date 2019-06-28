@@ -6,9 +6,10 @@ Files to help demonstrate using Tenable Container Security with Amazon EKS
 
 # Prerequisites:
 On your laptop:
-  pip install boto3
-  kubectl installed on your system
-  aws cli installed on your system
+  Install kubectl from https://kubernetes.io/docs/tasks/tools/install-kubectl/
+  Install aws-iam-authenticator from https://docs.aws.amazon.com/eks/latest/userguide/install-aws-iam-authenticator.html
+  Install aws cli from https://aws.amazon.com/cli/
+  Install AWS Python library: pip install boto3
 
 In AWS:
   Create a policy called EKS-Admin-policy that has all access to eks:.
@@ -25,15 +26,18 @@ In AWS:
   Create EKS-kubernetes-role with these policies:
     AmazonEKSClusterPolicy
     AmazonEKSServicePolicy
-  Create API keys for user
 
-
-
+# Create API keys for user and put them into ~/.aws/credentials.  For example:
+[default]
+aws_access_key_id=******************
+aws_secret_access_key=***************************
+region=us-east-1
+output=json
 
 
 # Example
 export ROLEARN=arn:aws:iam::0000000000:role/EKS-course-role
 export AGENTKEY=****************************
-./build.py --stackname tenable-eks-cs-demo-stack --stackyamlfile tenable-cs-eks-demo-vpc.yaml --rolearn $ROLEARN --wngyamlfile tenable-cs-eks-demo-nodegroup.yaml --sshprivatekey ~/.ssh/aws-eks-course-cybersmith-keypair.pem --agentkey $AGENTKEY --agentgroup "AWS EKS Worker Nodes"
+python3 ./build.py --stackname tenable-eks-cs-demo-stack --stackyamlfile tenable-cs-eks-demo-vpc.yaml --rolearn $ROLEARN --wngyamlfile tenable-cs-eks-demo-nodegroup.yaml --agentkey $AGENTKEY --agentgroup "AWS EKS Worker Nodes"
 
-python3 ./delete.py --sshprivatekey ~/.ssh/aws-eks-course-cybersmith-keypair.pem
+python3 ./delete.py

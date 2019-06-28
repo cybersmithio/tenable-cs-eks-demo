@@ -6,27 +6,35 @@ import time
 import boto3
 import sys
 import os
+import stat
 
-def createStack(stackname,templatefile):
-    print("Starting creation of stack "+str(stackname))
-    print("Using YAML file "+str(templatefile))
+def createStack(DEBUG,stackname,templatefile):
+    if DEBUG:
+        print("Starting creation of stack "+str(stackname))
+        print("Using YAML file "+str(templatefile))
 
     command = "aws cloudformation create-stack --stack-name "+str(stackname)+" --template-body file://"+str(templatefile)+""
-    print("Command:"+command)
+    if DEBUG:
+        print("Command:"+command)
     try:
         output=subprocess.check_output(command,shell=True)
     except:
         print("Error creating stack file")
         return(False)
-    print("Output: "+str(output))
+    if DEBUG:
+        print("Output: "+str(output))
 
     command="aws cloudformation wait stack-create-complete --stack-name "+str(stackname)
+    if DEBUG:
+        print("Command:"+command)
     try:
         output=subprocess.check_output(command,shell=True)
     except:
         print("Error creating stack file")
         return(False)
-    print("Output: "+str(output))
+
+    if DEBUG:
+        print("Output: "+str(output))
 
     return(True)
 
@@ -299,7 +307,7 @@ def applyAWSAuthYAML():
     print("Output: "+str(output))
 
 def testAWSConnectivity(DEBUG,eksclustername):
-    command="aws-iam-authenticator token -i tenable-eks-cs-demo-eks-cluster"
+    command="aws-iam-authenticator token -i "+str(eksclustername)
     if DEBUG:
         print("Command:"+command)
     try:
@@ -349,13 +357,44 @@ def displayPublicURLs(DEBUG,ec2):
     if DEBUG:
         print("\n\n\n***interfaces Found:",interfaces,"\n\n\n")
     print("Public URLs for this cluster:")
-    for i in interfaces['NetworkInterfaces']:
-        try:
-            print("http://"+str(i['PrivateIpAddresses'][0]['Association']['PublicIp']))
-        except:
-            x=0
+
+    RETRY=True
+    while RETRY:
+        RETRY=False
+        c=0
+        for i in interfaces['NetworkInterfaces']:
+            try:
+                print("http://"+str(i['PrivateIpAddresses'][0]['Association']['PublicIp']))
+                c+=1
+            except:
+                x=0
+        if c == 0:
+            if DEBUG:
+                print("Didn't find any public IP addresses yet. Waiting a bit...")
+            time.sleep(30)
+            RETRY=True
 
     return()
+
+def createEC2KeyPair(DEBUG,ec2,keypairname,privatekey):
+    if DEBUG:
+        print("Attempting to create keypair ",keypairname)
+    try:
+        response = ec2.create_key_pair(KeyName=str(keypairname))
+    except:
+        if DEBUG:
+            print("Problem creating keypair, it likely already exists")
+        return(False)
+
+    if DEBUG:
+        print("Response:",response)
+
+    with open(privatekey,"w+") as privatekeyfp:
+        privatekeyfp.write(response['KeyMaterial'])
+        os.fchmod(privatekeyfp.fileno(),stat.S_IRUSR | stat.S_IWUSR)
+
+    return(True)
+
 
 
 ################################################################
@@ -370,11 +409,11 @@ parser.add_argument('--eksclustername', help="The name of the EKS cluster",nargs
 parser.add_argument('--wngstackname', help="The name of the worker node group stack",nargs=1,action="store",default=["tenable-eks-cs-demo-worker-nodes"])
 parser.add_argument('--wngname', help="The name of the worker node group",nargs=1,action="store",default=["tenable-eks-cs-demo-worker-nodegroup"])
 parser.add_argument('--wngyamlfile', help="The YAML file defining the workernodegroup ",nargs=1,action="store",default=[None])
-parser.add_argument('--ec2keypairname', help="The name of the EC2 keypair to use for SSH worker node communication ",nargs=1,action="store",default=["tenable-eks-demo-keypair"])
+parser.add_argument('--ec2keypairname', help="The name of the EC2 keypair to use for SSH worker node communication ",nargs=1,action="store",default=["tenable-eks-demo-cs-keypair"])
 parser.add_argument('--sshprivatekey', help="The file name of the SSH private key on your system",nargs=1,action="store",default=[None])
 parser.add_argument('--agentkey', help="The Tenable.io agent linking key ",nargs=1,action="store",default=[None])
 parser.add_argument('--agentgroup', help="The Tenable.io agent group for the agents ",nargs=1,action="store",default=[None])
-parser.add_argument('--only', help="Only run one part of install: vpc, eks, nodegroup, agents, apps, display",nargs=1,action="store",default=[None])
+parser.add_argument('--only', help="Only run one part of install: vpc, eks, nodegroup, agents, apps, keypair, display",nargs=1,action="store",default=[None])
 args = parser.parse_args()
 
 DEBUG=False
@@ -387,41 +426,49 @@ if args.debug:
     DEBUG=True
 
 
-if args.only[0] == False:
-    CREATEVPC=True
-    CREATEEKS=True
-    CREATEWORKERS=True
-    INSTALLAGENTS=True
-    DEPLOYAPPS=True
+if args.only[0] == None:
+    VPCSTACK=True
+    EKSCLUSTER=True
+    WORKERS=True
+    AGENTS=True
+    APPS=True
+    KEYPAIR=True
 else:
-    CREATEVPC=False
-    CREATEEKS=False
-    CREATEWORKERS=False
-    INSTALLAGENTS=False
-    DEPLOYAPPS=False
+    VPCSTACK=False
+    EKSCLUSTER=False
+    WORKERS=False
+    AGENTS=False
+    APPS=False
+    KEYPAIR=False
     if args.only[0]=="vpc":
-        CREATEVPC=True
+        VPCSTACK=True
     elif args.only[0] == "eks":
-        CREATEEKS = True
+        EKSCLUSTER = True
     elif args.only[0]=="nodegroup":
-        CREATEWORKERS=True
+        WORKERS=True
     elif args.only[0]=="agents":
-        INSTALLAGENTS=True
-    elif args.only[0]=="apps":
-        DEPLOYAPPS=True
+        AGENTS=True
+    elif args.only[0] == "apps":
+        APPS = True
+    elif args.only[0]=="keypair":
+        KEYPAIR = True
+
+if args.sshprivatekey[0] == None:
+    args.sshprivatekey[0]=HOMEDIR+"/.ssh/tenable-eks-cs-demo-keypair.pem"
+
 
 #Check that all necessary parameters are given
-if CREATEVPC:
+if VPCSTACK:
     if args.stackyamlfile[0] == None:
         print("Need YAML file to create VPC stack")
         exit(-1)
 
-if CREATEEKS:
+if EKSCLUSTER:
     if args.rolearn[0] == None:
         print("Need role ARN for the creation of the EKS cluster")
         exit(-1)
 
-if CREATEWORKERS:
+if WORKERS:
     if args.wngyamlfile[0] == None:
         print("Need YAML file to create worker nodegroup stack")
         exit(-1)
@@ -429,10 +476,9 @@ if CREATEWORKERS:
         print("Need SSH Keypair for worker nodegroup stack")
         exit(-1)
 
-if INSTALLAGENTS:
-    if args.sshprivatekey[0] == None:
-        print("Need SSH private key location to install Nessus agents")
-        exit(-1)
+
+
+if AGENTS:
     if args.agentkey[0] == None:
         print("Need Tenable.io Agent linking key to install Nessus agents")
         exit(-1)
@@ -441,11 +487,16 @@ if INSTALLAGENTS:
         exit(-1)
 
 
-if CREATEVPC:
-    if createStack(args.stackname[0],args.stackyamlfile[0]) == False:
+
+#Execute steps
+if KEYPAIR:
+    if createEC2KeyPair(DEBUG,ec2,args.ec2keypairname[0],args.sshprivatekey[0]) == False:
         exit(-1)
-    if onlyaction != False:
-        exit(0)
+
+
+if VPCSTACK:
+    if createStack(DEBUG,args.stackname[0],args.stackyamlfile[0]) == False:
+        exit(-1)
 
 (vpc,sg,subnets)=gatherStackInfo(DEBUG,cf,args.stackname[0])
 if vpc != False:
@@ -453,11 +504,9 @@ if vpc != False:
     print("SG is",sg)
     print("Subnets are",subnets)
 
-if CREATEEKS:
+if EKSCLUSTER:
     if createEKS(eks,args.eksclustername[0],sg,subnets,args.rolearn[0]) == False:
         exit(-1)
-    if onlyaction != False:
-        exit(0)
 
 testAWSConnectivity(DEBUG,args.eksclustername[0])
 
@@ -465,28 +514,24 @@ testAWSConnectivity(DEBUG,args.eksclustername[0])
 print("EKS Endpoint:",eksendpoint)
 print("EKS CA:",eksca)
 
-if CREATEEKS:
+if EKSCLUSTER:
     writeKubeConfigEKS(eksca,eksendpoint,args.eksclustername[0],HOMEDIR)
 
-if CREATEWORKERS:
+if WORKERS:
     createWorkNodeStack(cf,args.wngstackname[0],args.wngname[0],args.wngyamlfile[0],vpc,sg,subnets,args.ec2keypairname[0])
     (wngrolearn) = getWorkerNodeStackInfo(cf, args.wngstackname[0])
     writeAWSAuthYAML(wngrolearn)
     applyAWSAuthYAML()
-    if onlyaction != False:
-        exit(0)
 
 
 
 ipaddrs=listEC2InstanceIPaddresses(DEBUG,ec2,args.eksclustername[0],args.wngname[0])
 
-if INSTALLAGENTS:
+if AGENTS:
     print("Installing Nessus Agents")
     installNessusAgent(args.sshprivatekey[0],args.agentkey[0],args.agentgroup[0],ipaddrs)
-    if onlyaction != False:
-        exit(0)
 
-if DEPLOYAPPS:
+if APPS:
     print("Deploying Guestbook app and Redis backend")
     deployGuestbook()
 
