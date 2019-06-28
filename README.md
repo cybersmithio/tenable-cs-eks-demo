@@ -15,7 +15,6 @@ Your workstation should be Linux, since this has not been tested on Windows.  Do
   * Install aws-iam-authenticator from https://docs.aws.amazon.com/eks/latest/userguide/install-aws-iam-authenticator.html
   * Install aws cli from https://aws.amazon.com/cli/
   * Install AWS Python library: pip install boto3
-  * Make some directories in your home directory: ``` mkdir .aws .ssh .kube ```
   * Update your shell profile with ``` export KUBECONFIG=~/.kube/kube-config-eks ```
   * Make sure this is in your shell profile 
 
@@ -51,9 +50,8 @@ output=json
 
 To create the AWS infrastructure and start everything up:
 ```
-export ROLEARN=arn:aws:iam::0000000000:role/EKS-role
 export AGENTKEY=****************************
-python3 ./build.py --stackname tenable-eks-cs-demo-stack --stackyamlfile tenable-cs-eks-demo-vpc.yaml --rolearn $ROLEARN --wngyamlfile tenable-cs-eks-demo-nodegroup.yaml --agentkey $AGENTKEY --agentgroup "AWS EKS Worker Nodes"
+python3 ./build.py --stackname tenable-eks-cs-demo-stack --stackyamlfile tenable-cs-eks-demo-vpc.yaml --eksrole EKS-role --wngyamlfile tenable-cs-eks-demo-nodegroup.yaml --agentkey $AGENTKEY --agentgroup "AWS EKS Worker Nodes" 
 ```
 
 To delete everything:

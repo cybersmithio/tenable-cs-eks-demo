@@ -402,6 +402,23 @@ def getRoleARN(DEBUG,iam,rolename):
     return(response['Role']['Arn'])
 
 
+def mkdirs(DEBUG,homedir):
+    try:
+        os.mkdir(homedir+"/.aws")
+    except:
+        print("Couldn't make ~/.aws/\nIt likely already exists")
+
+    try:
+        os.mkdir(homedir+"/.kube")
+    except:
+        print("Couldn't make ~/.kube/\nIt likely already exists")
+
+    try:
+        os.mkdir(homedir+"/.ssh")
+    except:
+        print("Couldn't make ~/.ssh/\nIt likely already exists")
+
+
 ################################################################
 # Start of program
 ################################################################
@@ -428,9 +445,11 @@ cf= boto3.client('cloudformation')
 eks = boto3.client('eks')
 iam = boto3.client('iam')
 
+
 if args.debug:
     DEBUG=True
 
+mkdirs(DEBUG,HOMEDIR)
 
 if args.only[0] == None:
     VPCSTACK=True
@@ -470,7 +489,7 @@ if VPCSTACK:
         exit(-1)
 
 if EKSCLUSTER:
-    if args.eksrolearn[0] == None:
+    if args.eksrole[0] == None:
         print("Need role ARN for the creation of the EKS cluster")
         exit(-1)
 
