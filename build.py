@@ -390,6 +390,16 @@ def createEC2KeyPair(DEBUG,ec2,keypairname,privatekey):
 
     return(True)
 
+def getRoleARN(DEBUG,iam,rolename):
+    try:
+        response=iam.get_role(RoleName=rolename)
+    except:
+        if DEBUG:
+            print("Problem getting ARN for role")
+        return(False)
+    if DEBUG:
+        print("Response",response)
+    return(response['Role']['Arn'])
 
 
 ################################################################
@@ -397,7 +407,7 @@ def createEC2KeyPair(DEBUG,ec2,keypairname,privatekey):
 ################################################################
 parser = argparse.ArgumentParser(description="Creates EKS environment to demonstration Tenable Container Security")
 parser.add_argument('--debug',help="Display a **LOT** of information",action="store_true")
-parser.add_argument('--rolearn', help="The ARN of the role to use in the EKS cluster",nargs=1,action="store",default=[None])
+parser.add_argument('--eksrole', help="The name of the EKS role used in the EKS cluster",nargs=1,action="store",default=["EKS-role"])
 parser.add_argument('--stackname', help="The name of the stack ",nargs=1,action="store",default=["tenable-eks-cs-demo-stack"])
 parser.add_argument('--stackyamlfile', help="The YAML file defining the stack ",nargs=1,action="store",default=[None])
 parser.add_argument('--eksclustername', help="The name of the EKS cluster",nargs=1,action="store",default=["tenable-eks-cs-demo-eks-cluster"])
@@ -416,6 +426,7 @@ HOMEDIR=os.getenv("HOME")
 ec2 = boto3.client('ec2')
 cf= boto3.client('cloudformation')
 eks = boto3.client('eks')
+iam = boto3.client('iam')
 
 if args.debug:
     DEBUG=True
@@ -459,7 +470,7 @@ if VPCSTACK:
         exit(-1)
 
 if EKSCLUSTER:
-    if args.rolearn[0] == None:
+    if args.eksrolearn[0] == None:
         print("Need role ARN for the creation of the EKS cluster")
         exit(-1)
 
@@ -500,7 +511,8 @@ if vpc != False:
     print("Subnets are",subnets)
 
 if EKSCLUSTER:
-    if createEKS(eks,args.eksclustername[0],sg,subnets,args.rolearn[0]) == False:
+    rolearn=getRoleARN(DEBUG,iam,args.eksrole[0])
+    if createEKS(eks,args.eksclustername[0],sg,subnets,rolearn) == False:
         exit(-1)
 
 testAWSConnectivity(DEBUG,args.eksclustername[0])
