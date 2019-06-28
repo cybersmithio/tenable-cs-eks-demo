@@ -358,23 +358,18 @@ def displayPublicURLs(DEBUG,ec2):
         print("\n\n\n***interfaces Found:",interfaces,"\n\n\n")
     print("Public URLs for this cluster:")
 
-    RETRY=True
-    while RETRY:
-        RETRY=False
-        c=0
-        for i in interfaces['NetworkInterfaces']:
-            try:
-                print("http://"+str(i['PrivateIpAddresses'][0]['Association']['PublicIp']))
-                c+=1
-            except:
-                x=0
-        if c == 0:
-            if DEBUG:
-                print("Didn't find any public IP addresses yet. Waiting a bit...")
-            time.sleep(30)
-            RETRY=True
+    c=0
+    for i in interfaces['NetworkInterfaces']:
+        try:
+            print("http://"+str(i['PrivateIpAddresses'][0]['Association']['PublicIp']))
+            c+=1
+        except:
+            x=0
 
-    return()
+    if c == 0 :
+        return(False)
+
+    return(True)
 
 def createEC2KeyPair(DEBUG,ec2,keypairname,privatekey):
     if DEBUG:
@@ -524,7 +519,6 @@ if WORKERS:
     applyAWSAuthYAML()
 
 
-
 ipaddrs=listEC2InstanceIPaddresses(DEBUG,ec2,args.eksclustername[0],args.wngname[0])
 
 if AGENTS:
@@ -534,6 +528,9 @@ if AGENTS:
 if APPS:
     print("Deploying Guestbook app and Redis backend")
     deployGuestbook()
+    while displayPublicURLs(DEBUG,ec2) == False:
+        print("No public URLs available yet...waiting 30 seconds")
+        time.sleep(30)
 
 displayPublicURLs(DEBUG,ec2)
 
