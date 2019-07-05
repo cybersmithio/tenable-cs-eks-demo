@@ -4,7 +4,6 @@ import argparse
 import subprocess
 import time
 import boto3
-from botocore.exceptions import ClientError
 import sys
 import os
 import stat
@@ -359,50 +358,22 @@ def displayPublicURLs(DEBUG,ec2):
         print("\n\n\n***interfaces Found:",interfaces,"\n\n\n")
     print("Public URLs for this cluster:")
 
-    RETRY=True
-    while RETRY:
-        RETRY=False
-        c=0
-        for i in interfaces['NetworkInterfaces']:
-            try:
-                print("http://"+str(i['PrivateIpAddresses'][0]['Association']['PublicIp']))
-                c+=1
-            except:
-                x=0
-        if c == 0:
-            if DEBUG:
-                print("Didn't find any public IP addresses yet. Waiting a bit...")
-            time.sleep(30)
-            RETRY=True
+    c=0
+    for i in interfaces['NetworkInterfaces']:
+        try:
+            print("http://"+str(i['PrivateIpAddresses'][0]['Association']['PublicIp']))
+            c+=1
+        except:
+            x=0
 
-    return()
-
-#Checks if the key pair already exists
-def getKeyPair(DEBUG,ec2,keypairname):
-    try:
-        response = ec2.describe_key_pairs(KeyNames=[ str(keypairname)])
-    except ClientError as e:
-        if e.response['Error']['Code'] == 'InvalidKeyPair.NotFound':
-            if DEBUG:
-                print("Keypair does not exist")
-            return(False)
-        else:
-            print("Error retrieving keypair information", sys.exc_info()[0], sys.exc_info()[1])
-    except:
-        print("Error retrieving keypair information",sys.exc_info()[0],sys.exc_info()[1])
+    if c == 0 :
         return(False)
 
-    if DEBUG:
-        print("Response:",response)
     return(True)
 
 def createEC2KeyPair(DEBUG,ec2,keypairname,privatekey):
     if DEBUG:
         print("Attempting to create keypair ",keypairname)
-
-    if getKeyPair(DEBUG,ec2,keypairname) == True:
-        print("Keypair already exists. Skipping creation...")
-
     try:
         response = ec2.create_key_pair(KeyName=str(keypairname))
     except:
@@ -419,6 +390,33 @@ def createEC2KeyPair(DEBUG,ec2,keypairname,privatekey):
 
     return(True)
 
+def getRoleARN(DEBUG,iam,rolename):
+    try:
+        response=iam.get_role(RoleName=rolename)
+    except:
+        if DEBUG:
+            print("Problem getting ARN for role")
+        return(False)
+    if DEBUG:
+        print("Response",response)
+    return(response['Role']['Arn'])
+
+
+def mkdirs(DEBUG,homedir):
+    try:
+        os.mkdir(homedir+"/.aws")
+    except:
+        print("Couldn't make ~/.aws/\nIt likely already exists")
+
+    try:
+        os.mkdir(homedir+"/.kube")
+    except:
+        print("Couldn't make ~/.kube/\nIt likely already exists")
+
+    try:
+        os.mkdir(homedir+"/.ssh")
+    except:
+        print("Couldn't make ~/.ssh/\nIt likely already exists")
 
 
 ################################################################
@@ -426,7 +424,7 @@ def createEC2KeyPair(DEBUG,ec2,keypairname,privatekey):
 ################################################################
 parser = argparse.ArgumentParser(description="Creates EKS environment to demonstration Tenable Container Security")
 parser.add_argument('--debug',help="Display a **LOT** of information",action="store_true")
-parser.add_argument('--rolearn', help="The ARN of the role to use in the EKS cluster",nargs=1,action="store",default=[None])
+parser.add_argument('--eksrole', help="The name of the EKS role used in the EKS cluster",nargs=1,action="store",default=["EKS-role"])
 parser.add_argument('--stackname', help="The name of the stack ",nargs=1,action="store",default=["tenable-eks-cs-demo-stack"])
 parser.add_argument('--stackyamlfile', help="The YAML file defining the stack ",nargs=1,action="store",default=[None])
 parser.add_argument('--eksclustername', help="The name of the EKS cluster",nargs=1,action="store",default=["tenable-eks-cs-demo-eks-cluster"])
@@ -438,8 +436,6 @@ parser.add_argument('--sshprivatekey', help="The file name of the SSH private ke
 parser.add_argument('--agentkey', help="The Tenable.io agent linking key ",nargs=1,action="store",default=[None])
 parser.add_argument('--agentgroup', help="The Tenable.io agent group for the agents ",nargs=1,action="store",default=[None])
 parser.add_argument('--only', help="Only run one part of install: vpc, eks, nodegroup, agents, apps, keypair, display",nargs=1,action="store",default=[None])
-parser.add_argument('--showkeypair', help="Displays the keypair if it exists and exit",action="store_true")
-
 args = parser.parse_args()
 
 DEBUG=False
@@ -447,13 +443,13 @@ HOMEDIR=os.getenv("HOME")
 ec2 = boto3.client('ec2')
 cf= boto3.client('cloudformation')
 eks = boto3.client('eks')
+iam = boto3.client('iam')
+
 
 if args.debug:
     DEBUG=True
 
-if args.showkeypair:
-    getKeyPair(DEBUG,ec2,args.ec2keypairname[0])
-    exit(0)
+mkdirs(DEBUG,HOMEDIR)
 
 if args.only[0] == None:
     VPCSTACK=True
@@ -493,7 +489,7 @@ if VPCSTACK:
         exit(-1)
 
 if EKSCLUSTER:
-    if args.rolearn[0] == None:
+    if args.eksrole[0] == None:
         print("Need role ARN for the creation of the EKS cluster")
         exit(-1)
 
@@ -534,7 +530,8 @@ if vpc != False:
     print("Subnets are",subnets)
 
 if EKSCLUSTER:
-    if createEKS(eks,args.eksclustername[0],sg,subnets,args.rolearn[0]) == False:
+    rolearn=getRoleARN(DEBUG,iam,args.eksrole[0])
+    if createEKS(eks,args.eksclustername[0],sg,subnets,rolearn) == False:
         exit(-1)
 
 testAWSConnectivity(DEBUG,args.eksclustername[0])
@@ -553,7 +550,6 @@ if WORKERS:
     applyAWSAuthYAML()
 
 
-
 ipaddrs=listEC2InstanceIPaddresses(DEBUG,ec2,args.eksclustername[0],args.wngname[0])
 
 if AGENTS:
@@ -563,6 +559,9 @@ if AGENTS:
 if APPS:
     print("Deploying Guestbook app and Redis backend")
     deployGuestbook()
+    while displayPublicURLs(DEBUG,ec2) == False:
+        print("No public URLs available yet...waiting 30 seconds")
+        time.sleep(30)
 
 displayPublicURLs(DEBUG,ec2)
 
