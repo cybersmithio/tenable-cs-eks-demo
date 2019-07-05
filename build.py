@@ -4,6 +4,7 @@ import argparse
 import subprocess
 import time
 import boto3
+from botocore.exceptions import ClientError
 import sys
 import os
 import stat
@@ -376,9 +377,32 @@ def displayPublicURLs(DEBUG,ec2):
 
     return()
 
+#Checks if the key pair already exists
+def getKeyPair(DEBUG,ec2,keypairname):
+    try:
+        response = ec2.describe_key_pairs(KeyNames=[ str(keypairname)])
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'InvalidKeyPair.NotFound':
+            if DEBUG:
+                print("Keypair does not exist")
+            return(False)
+        else:
+            print("Error retrieving keypair information", sys.exc_info()[0], sys.exc_info()[1])
+    except:
+        print("Error retrieving keypair information",sys.exc_info()[0],sys.exc_info()[1])
+        return(False)
+
+    if DEBUG:
+        print("Response:",response)
+    return(True)
+
 def createEC2KeyPair(DEBUG,ec2,keypairname,privatekey):
     if DEBUG:
         print("Attempting to create keypair ",keypairname)
+
+    if getKeyPair(DEBUG,ec2,keypairname) == True:
+        print("Keypair already exists. Skipping creation...")
+
     try:
         response = ec2.create_key_pair(KeyName=str(keypairname))
     except:
@@ -414,6 +438,8 @@ parser.add_argument('--sshprivatekey', help="The file name of the SSH private ke
 parser.add_argument('--agentkey', help="The Tenable.io agent linking key ",nargs=1,action="store",default=[None])
 parser.add_argument('--agentgroup', help="The Tenable.io agent group for the agents ",nargs=1,action="store",default=[None])
 parser.add_argument('--only', help="Only run one part of install: vpc, eks, nodegroup, agents, apps, keypair, display",nargs=1,action="store",default=[None])
+parser.add_argument('--showkeypair', help="Displays the keypair if it exists and exit",action="store_true")
+
 args = parser.parse_args()
 
 DEBUG=False
@@ -425,6 +451,9 @@ eks = boto3.client('eks')
 if args.debug:
     DEBUG=True
 
+if args.showkeypair:
+    getKeyPair(DEBUG,ec2,args.ec2keypairname[0])
+    exit(0)
 
 if args.only[0] == None:
     VPCSTACK=True
