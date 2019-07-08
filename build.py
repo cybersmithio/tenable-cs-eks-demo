@@ -4,39 +4,13 @@ import argparse
 import subprocess
 import time
 import boto3
+from botocore.exceptions import ClientError
 import sys
 import os
-import stat
+import jawa
+import jkl
+import re
 
-def createStack(DEBUG,stackname,templatefile):
-    if DEBUG:
-        print("Starting creation of stack "+str(stackname))
-        print("Using YAML file "+str(templatefile))
-
-    command = "aws cloudformation create-stack --stack-name "+str(stackname)+" --template-body file://"+str(templatefile)+""
-    if DEBUG:
-        print("Command:"+command)
-    try:
-        output=subprocess.check_output(command,shell=True)
-    except:
-        print("Error creating stack file")
-        return(False)
-    if DEBUG:
-        print("Output: "+str(output))
-
-    command="aws cloudformation wait stack-create-complete --stack-name "+str(stackname)
-    if DEBUG:
-        print("Command:"+command)
-    try:
-        output=subprocess.check_output(command,shell=True)
-    except:
-        print("Error creating stack file")
-        return(False)
-
-    if DEBUG:
-        print("Output: "+str(output))
-
-    return(True)
 
 
 def gatherStackInfo(DEBUG,cf,stackname):
@@ -69,28 +43,6 @@ def gatherStackInfo(DEBUG,cf,stackname):
     return(vpc,sg,subnets)
 
 
-def createEKS(eks,clustername,sg,subnets,rolearn):
-    print("Creating EKS cluster with name",clustername,"and roleARN",rolearn," using subnets",subnets,"and security group",sg)
-
-    try:
-        response = eks.create_cluster(name=str(clustername), roleArn=str(rolearn), resourcesVpcConfig={'subnetIds': subnets, 'securityGroupIds': [str(sg)], })
-    except:
-        print("Error creating EKS cluster",sys.exc_info()[0], sys.exc_info()[1])
-        return(False)
-    print("Output from EKS create cluster command: ",response)
-
-    print("Waiting for EKS cluster to finish building...")
-    waiter=eks.get_waiter('cluster_active')
-    try:
-        waiter.wait(name=str(clustername))
-    except:
-        print("Error creating EKS cluster")
-        return(False)
-    print("Done!")
-
-    return(True)
-
-
 
 def gatherEKSInfo(DEBUG,eks,eksclustername):
     eksendpoint=False
@@ -108,49 +60,6 @@ def gatherEKSInfo(DEBUG,eks,eksclustername):
     eksca = response['cluster']['certificateAuthority']['data']
 
     return(eksendpoint,eksca)
-
-
-
-def createWorkNodeStack(cf,stackname,nodegroupname,templatefile,vpc,sg,subnets,keypair):
-    print("Starting creation of worker node group ",str(stackname), "with subnets",str(subnets))
-    print("Using YAML file "+str(templatefile))
-
-    with open(templatefile,"r") as yamlfile:
-        yamlfilestr=yamlfile.read()
-
-    subnetstr=""
-    for i in subnets:
-        if subnetstr != "":
-            subnetstr+=","+str(i)
-        else:
-            subnetstr=str(i)
-
-    try:
-        response = cf.create_stack(StackName=str(stackname),TemplateBody=yamlfilestr,Capabilities=['CAPABILITY_IAM'],
-                Parameters=[
-                {"ParameterKey": "NodeGroupName","ParameterValue": str(nodegroupname) },
-                {"ParameterKey": "ClusterControlPlaneSecurityGroup","ParameterValue": str(sg) },
-                {"ParameterKey": "KeyName","ParameterValue": str(keypair) },
-                {"ParameterKey": "VpcId","ParameterValue": str(vpc) },
-                {"ParameterKey": "Subnets","ParameterValue": subnetstr } ])
-    except:
-        print("Error creating worker node group", sys.exc_info()[0], sys.exc_info()[1])
-        return (False)
-
-
-    print("Output: ",response)
-
-    print("Waiting for cloud formation to finish for worker node group")
-    waiter=cf.get_waiter('stack_create_complete')
-    try:
-        waiter.wait(StackName=str(stackname))
-    except:
-        print("Error creating stack file")
-        return(False)
-
-    print("Done!")
-
-    return(True)
 
 
 def listEC2InstanceIPaddresses(DEBUG,ec2,eksclustername,wngname):
@@ -175,53 +84,104 @@ def listEC2InstanceIPaddresses(DEBUG,ec2,eksclustername,wngname):
 
 
 
-def installNessusAgent(sshprivatekey,agentkey,agentgroup,ipaddrs):
+def installNessusAgent(DEBUG,sshprivatekey,agentkey,agentgroup,ipaddrs):
     print("IP addresses on which to install Nessus Agents:",ipaddrs)
     for ipaddress in ipaddrs:
         print("Installing Nessus Agent on",ipaddress)
 
-        #Copy over agent
-        command="scp -o StrictHostKeyChecking=no -i "+str(sshprivatekey)+" NessusAgent-7.4.1.rpm ec2-user@"+str(ipaddress)+":"
-        print("Command:"+command)
-        try:
-            output=subprocess.check_output(command,shell=True)
-        except:
-            print("Error creating stack file")
-            return(False)
+        retval=existingNessusAgent(DEBUG,sshprivatekey,ipaddress)
+        if retval == 0:
+            #Copy over agent
+            command="scp -o StrictHostKeyChecking=no -i "+str(sshprivatekey)+" NessusAgent-7.4.1.rpm ec2-user@"+str(ipaddress)+":"
+            print("Command:"+command)
+            try:
+                output=subprocess.check_output(command,shell=True)
+            except:
+                print("Error copying Nessus Agent to worker node")
+                return(False)
+            print("Output: "+str(output))
+
+            #Install RPM
+            command="ssh -o StrictHostKeyChecking=no -i "+str(sshprivatekey)+" ec2-user@"+str(ipaddress)+" sudo rpm -ivh NessusAgent-7.4.1.rpm"
+            print("Command:"+command)
+            try:
+                output=subprocess.check_output(command,shell=True)
+            except:
+                print("Error installing Nessus Agent on worker node")
+            print("Output: "+str(output))
+
+            #Start the agent
+            command="ssh -o StrictHostKeyChecking=no -i "+str(sshprivatekey)+" ec2-user@"+str(ipaddress)+" sudo /sbin/service nessusagent start"
+            print("Command:"+command)
+            try:
+                output=subprocess.check_output(command,shell=True)
+            except:
+                print("Error starting Nessus Agent on worker node")
+            print("Output: "+str(output))
+
+            time.sleep(5)
+
+        if retval <= 1:
+            #Link the agent
+            command="ssh -o StrictHostKeyChecking=no -i "+str(sshprivatekey)+" ec2-user@"+str(ipaddress)+ \
+                    " sudo /opt/nessus_agent/sbin/nessuscli agent link --key="+str(agentkey)+" --cloud --groups=\\'"+str(agentgroup)+"\\'"
+            print("Command:"+command)
+            try:
+                output=subprocess.check_output(command,shell=True)
+            except:
+                print("Error linking Nessus Agent to worker node")
+                return(False)
+            print("Output: "+str(output))
+
+#Returns:
+#  0 if no existing Agent
+#  1 if agent installed but not linked
+#  2 if agent is linked
+def existingNessusAgent(DEBUG,sshprivatekey,ipaddress):
+    print("Installing Nessus Agent on",ipaddress)
+
+    #Link the agent
+    command="ssh -o StrictHostKeyChecking=no -i "+str(sshprivatekey)+" ec2-user@"+str(ipaddress)+ \
+            " sudo /opt/nessus_agent/sbin/nessuscli agent status"
+    print("Command:"+command)
+    try:
+        output=subprocess.check_output(command,shell=True).decode('utf-8')
+    except:
+        print("Error getting agent status")
+        return(0)
+
+    if DEBUG:
         print("Output: "+str(output))
 
-        #Install RPM
-        command="ssh -o StrictHostKeyChecking=no -i "+str(sshprivatekey)+" ec2-user@"+str(ipaddress)+" sudo rpm -ivh NessusAgent-7.4.1.rpm"
-        print("Command:"+command)
-        try:
-            output=subprocess.check_output(command,shell=True)
-        except:
-            print("Error creating stack file")
-            return(False)
-        print("Output: "+str(output))
+    status = re.match(".*(Link failed with error).*", output)
+    if status != None:
+        if DEBUG:
+            print("Agent is not linked.")
+        return(1)
 
-        #Start the agent
-        command="ssh -o StrictHostKeyChecking=no -i "+str(sshprivatekey)+" ec2-user@"+str(ipaddress)+" sudo /sbin/service nessusagent start"
-        print("Command:"+command)
-        try:
-            output=subprocess.check_output(command,shell=True)
-        except:
-            print("Error creating stack file")
-            return(False)
-        print("Output: "+str(output))
+    status = re.match(".*(Not linked to a manager).*", output)
+    if status != None:
+        if DEBUG:
+            print("Agent is not linked.")
+        return(1)
 
-        time.sleep(5)
+    status = re.match(".*(command not found).*", output)
+    if status != None:
+        if DEBUG:
+            print("Agent is not linked.")
+        return(1)
 
-        #Link the agent
-        command="ssh -o StrictHostKeyChecking=no -i "+str(sshprivatekey)+" ec2-user@"+str(ipaddress)+ \
-                " sudo /opt/nessus_agent/sbin/nessuscli agent link --key="+str(agentkey)+" --cloud --groups=\\'"+str(agentgroup)+"\\'"
-        print("Command:"+command)
-        try:
-            output=subprocess.check_output(command,shell=True)
-        except:
-            print("Error creating stack file")
-            return(False)
-        print("Output: "+str(output))
+    status = re.match(".*(Linked to: cloud.tenable.com).*", output)
+    if status != None:
+        if DEBUG:
+            print("Agent is linked to cloud.tenable.com")
+        return(2)
+    else:
+        if DEBUG:
+            print("Agent does not appear to be linked.")
+        return(1)
+
+    return(0)
 
 
 def writeKubeConfigEKS(eksca,eksendpoint,eksclustername,homedir):
@@ -371,35 +331,8 @@ def displayPublicURLs(DEBUG,ec2):
 
     return(True)
 
-def createEC2KeyPair(DEBUG,ec2,keypairname,privatekey):
-    if DEBUG:
-        print("Attempting to create keypair ",keypairname)
-    try:
-        response = ec2.create_key_pair(KeyName=str(keypairname))
-    except:
-        if DEBUG:
-            print("Problem creating keypair, it likely already exists")
-        return(False)
 
-    if DEBUG:
-        print("Response:",response)
 
-    with open(privatekey,"w+") as privatekeyfp:
-        privatekeyfp.write(response['KeyMaterial'])
-        os.fchmod(privatekeyfp.fileno(),stat.S_IRUSR | stat.S_IWUSR)
-
-    return(True)
-
-def getRoleARN(DEBUG,iam,rolename):
-    try:
-        response=iam.get_role(RoleName=rolename)
-    except:
-        if DEBUG:
-            print("Problem getting ARN for role")
-        return(False)
-    if DEBUG:
-        print("Response",response)
-    return(response['Role']['Arn'])
 
 
 def mkdirs(DEBUG,homedir):
@@ -419,6 +352,7 @@ def mkdirs(DEBUG,homedir):
         print("Couldn't make ~/.ssh/\nIt likely already exists")
 
 
+
 ################################################################
 # Start of program
 ################################################################
@@ -436,6 +370,11 @@ parser.add_argument('--sshprivatekey', help="The file name of the SSH private ke
 parser.add_argument('--agentkey', help="The Tenable.io agent linking key ",nargs=1,action="store",default=[None])
 parser.add_argument('--agentgroup', help="The Tenable.io agent group for the agents ",nargs=1,action="store",default=[None])
 parser.add_argument('--only', help="Only run one part of install: vpc, eks, nodegroup, agents, apps, keypair, display",nargs=1,action="store",default=[None])
+parser.add_argument('--existingkeypair',help="Check if there is an existing keypair",action="store_true")
+parser.add_argument('--existingvpc',help="Check if there is an existing VPC cloud formation stack",action="store_true")
+parser.add_argument('--existingeks',help="Check if there is an existing EKS cluster",action="store_true")
+parser.add_argument('--existingwng',help="Check if there is an existing Kubernetes worker node group stack",action="store_true")
+parser.add_argument('--existingapps',help="Check if the apps have already been deployed",action="store_true")
 args = parser.parse_args()
 
 DEBUG=False
@@ -451,49 +390,59 @@ if args.debug:
 
 mkdirs(DEBUG,HOMEDIR)
 
-if args.only[0] == None:
-    VPCSTACK=True
-    EKSCLUSTER=True
-    WORKERS=True
-    AGENTS=True
-    APPS=True
-    KEYPAIR=True
-else:
-    VPCSTACK=False
-    EKSCLUSTER=False
-    WORKERS=False
-    AGENTS=False
-    APPS=False
-    KEYPAIR=False
-    if args.only[0]=="vpc":
-        VPCSTACK=True
-    elif args.only[0] == "eks":
-        EKSCLUSTER = True
-    elif args.only[0]=="nodegroup":
-        WORKERS=True
-    elif args.only[0]=="agents":
-        AGENTS=True
-    elif args.only[0] == "apps":
-        APPS = True
-    elif args.only[0]=="keypair":
-        KEYPAIR = True
+if args.existingkeypair:
+    if jawa.existingEC2KeyPair(DEBUG,ec2,args.ec2keypairname[0]):
+        print("Key pair already exists")
+    else:
+        print("Key pair does not exist.")
+    exit(0)
+
+if args.existingvpc:
+    if jawa.existingCFStack(DEBUG,cf,args.stackname[0]):
+        print("VPC stack already exists.")
+    else:
+        print("VPC stack does not exist.")
+    exit(0)
+
+if args.existingwng:
+    if jawa.existingCFStack(DEBUG,cf,args.wngname[0]):
+        print("Worker node group stack already exists.")
+    else:
+        print("Worker node group stack does not exist.")
+    exit(0)
+
+if args.existingeks:
+    if jawa.existingEKS(DEBUG,eks,args.eksclustername[0]):
+        print("EKS cluster already exists.")
+    else:
+        print("EKS cluster does not exist.")
+    exit(0)
+
+if args.existingapps:
+    retval=jkl.checkRunningPods(DEBUG)
+    if retval >= 0 :
+        print("Existing Kubernetes apps already deployed. # of Pods:",retval)
+    else:
+        print("No existing Kubernetes apps found.")
+    exit(0)
+
 
 if args.sshprivatekey[0] == None:
     args.sshprivatekey[0]=HOMEDIR+"/.ssh/tenable-eks-cs-demo-keypair.pem"
 
 
 #Check that all necessary parameters are given
-if VPCSTACK:
+if args.only[0] == None or args.only[0]=="vpc":
     if args.stackyamlfile[0] == None:
         print("Need YAML file to create VPC stack")
         exit(-1)
 
-if EKSCLUSTER:
+if args.only[0] == None or args.only[0]=="eks":
     if args.eksrole[0] == None:
         print("Need role ARN for the creation of the EKS cluster")
         exit(-1)
 
-if WORKERS:
+if args.only[0] == None or args.only[0]=="nodegroup":
     if args.wngyamlfile[0] == None:
         print("Need YAML file to create worker nodegroup stack")
         exit(-1)
@@ -501,9 +450,7 @@ if WORKERS:
         print("Need SSH Keypair for worker nodegroup stack")
         exit(-1)
 
-
-
-if AGENTS:
+if args.only[0] == None or args.only[0]=="agents":
     if args.agentkey[0] == None:
         print("Need Tenable.io Agent linking key to install Nessus agents")
         exit(-1)
@@ -514,14 +461,17 @@ if AGENTS:
 
 
 #Execute steps
-if KEYPAIR:
-    if createEC2KeyPair(DEBUG,ec2,args.ec2keypairname[0],args.sshprivatekey[0]) == False:
+if args.only[0] == None or args.only[0]=="keypair":
+    if jawa.createEC2KeyPair(DEBUG,ec2,args.ec2keypairname[0],args.sshprivatekey[0]) == False:
         exit(-1)
+    if args.only[0] == "keypair":
+        exit(0)
 
-
-if VPCSTACK:
-    if createStack(DEBUG,args.stackname[0],args.stackyamlfile[0]) == False:
+if args.only[0] == None or args.only[0]=="vpc":
+    if jawa.createCFStack(DEBUG,cf,args.stackname[0],args.stackyamlfile[0]) == False:
         exit(-1)
+    if args.only[0] == "vpc":
+        exit(0)
 
 (vpc,sg,subnets)=gatherStackInfo(DEBUG,cf,args.stackname[0])
 if vpc != False:
@@ -529,10 +479,11 @@ if vpc != False:
     print("SG is",sg)
     print("Subnets are",subnets)
 
-if EKSCLUSTER:
-    rolearn=getRoleARN(DEBUG,iam,args.eksrole[0])
-    if createEKS(eks,args.eksclustername[0],sg,subnets,rolearn) == False:
+if args.only[0] == None or args.only[0]=="eks":
+    rolearn=jawa.getRoleARN(DEBUG,iam,args.eksrole[0])
+    if jawa.createEKS(DEBUG,eks,args.eksclustername[0],sg,subnets,rolearn) == False:
         exit(-1)
+
 
 testAWSConnectivity(DEBUG,args.eksclustername[0])
 
@@ -540,29 +491,51 @@ testAWSConnectivity(DEBUG,args.eksclustername[0])
 print("EKS Endpoint:",eksendpoint)
 print("EKS CA:",eksca)
 
-if EKSCLUSTER:
+if args.only[0] == None or args.only[0]=="eks":
     writeKubeConfigEKS(eksca,eksendpoint,args.eksclustername[0],HOMEDIR)
+    if args.only[0] == "eks":
+        exit(0)
 
-if WORKERS:
-    createWorkNodeStack(cf,args.wngstackname[0],args.wngname[0],args.wngyamlfile[0],vpc,sg,subnets,args.ec2keypairname[0])
+if args.only[0] == None or args.only[0]=="nodegroup":
+    #Create CloudFormation stack for worker node group
+    subnetstr=""
+    for i in subnets:
+        if subnetstr != "":
+            subnetstr+=","+str(i)
+        else:
+            subnetstr=str(i)
+    jawa.createCFStack(DEBUG,cf,args.wngstackname[0],args.wngyamlfile[0],capabilities = ['CAPABILITY_IAM'],parameters=[
+                                   {"ParameterKey": "NodeGroupName", "ParameterValue": str(args.wngname[0])},
+                                   {"ParameterKey": "ClusterControlPlaneSecurityGroup", "ParameterValue": str(sg)},
+                                   {"ParameterKey": "KeyName", "ParameterValue": str(args.ec2keypairname[0])},
+                                   {"ParameterKey": "VpcId", "ParameterValue": str(vpc)},
+                                   {"ParameterKey": "Subnets", "ParameterValue": subnetstr}])
+
     (wngrolearn) = getWorkerNodeStackInfo(cf, args.wngstackname[0])
     writeAWSAuthYAML(wngrolearn)
     applyAWSAuthYAML()
+    if args.only[0] == "nodegroup":
+        exit(0)
 
 
 ipaddrs=listEC2InstanceIPaddresses(DEBUG,ec2,args.eksclustername[0],args.wngname[0])
 
-if AGENTS:
+if args.only[0] == None or args.only[0]=="agents":
     print("Installing Nessus Agents")
-    installNessusAgent(args.sshprivatekey[0],args.agentkey[0],args.agentgroup[0],ipaddrs)
+    installNessusAgent(DEBUG,args.sshprivatekey[0],args.agentkey[0],args.agentgroup[0],ipaddrs)
+    if args.only[0] == "agents":
+        exit(0)
 
-if APPS:
+if args.only[0] == None or args.only[0]=="apps":
     print("Deploying Guestbook app and Redis backend")
     deployGuestbook()
     while displayPublicURLs(DEBUG,ec2) == False:
         print("No public URLs available yet...waiting 30 seconds")
         time.sleep(30)
+    if args.only[0] == "apps":
+        exit(0)
 
-displayPublicURLs(DEBUG,ec2)
+if args.only[0] == None or args.only[0]=="display":
+    displayPublicURLs(DEBUG,ec2)
 
 exit(0)

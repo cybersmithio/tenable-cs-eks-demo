@@ -5,53 +5,8 @@ import subprocess
 import time
 import boto3
 import os
-
-
-
-
-def deleteEKS(clustername):
-    command = "aws eks delete-cluster --name "+str(clustername)
-    print("Command:"+command)
-    try:
-        output=subprocess.check_output(command,shell=True)
-    except:
-        print("Error deleting EKS cluster")
-        return(False)
-    print("Output: "+str(output))
-
-    print("Waiting for EKS to delete")
-    command = "aws eks wait cluster-deleted --name " + str(clustername)
-    while True:
-        try:
-            output=subprocess.check_output(command,shell=True)
-            break
-        except:
-            print("Error waiting for EKS cluster to finish deleting")
-
-    print("EKS cluster successfully deleted")
-
-
-def deleteStack(stackname):
-    print("Starting deletion of stack "+str(stackname))
-    command="aws cloudformation delete-stack --stack-name "+str(stackname)
-    print("Command:"+command)
-    try:
-        output=subprocess.check_output(command,shell=True)
-    except:
-        print("Error deleting stack")
-        return(False)
-    print("Output: ",output)
-
-    command="aws cloudformation wait stack-delete-complete --stack-name "+str(stackname)
-    print("Command:"+command)
-    try:
-        output=subprocess.check_output(command,shell=True)
-    except:
-        print("Error deleting stack")
-        return(False)
-    print("Output: ",output)
-
-    return(True)
+import jawa
+import jkl
 
 
 def listEC2InstanceIPaddresses(ec2,eksclustername,wngname):
@@ -68,9 +23,6 @@ def listEC2InstanceIPaddresses(ec2,eksclustername,wngname):
             except:
                 print("No public network interface for this instance")
     return(ipaddrs)
-
-
-
 
 def removeNessusAgent(sshprivatekey,ipaddrs):
     print("Removing Nessus Agents from worker nodes")
@@ -89,46 +41,47 @@ def removeNessusAgent(sshprivatekey,ipaddrs):
         print("Output: "+str(output))
 
 
-def deletingGuestbook():
+def deletingGuestbook(DEBUG):
+    c=0
+    output=""
 
-    print("Deleting guestbook frontend")
-    command="kubectl delete -f guestbook-frontend.yaml"
-    print("Command:"+command)
-    try:
-        output=subprocess.check_output(command,shell=True)
-    except:
-        print("Error deleting stack file")
-        return(False)
-    print("Output: "+str(output))
+    while jkl.checkRunningPods(DEBUG) > 0:
+        print("Deleting guestbook frontend")
+        command="kubectl delete -f guestbook-frontend.yaml"
+        print("Command:"+command)
+        try:
+            output=subprocess.check_output(command,shell=True)
+        except:
+            print("Error deleting stack file")
+        print("Output: "+str(output))
 
-    print("Deleting redis slaves")
-    command="kubectl delete -f redis-slaves.yaml"
-    print("Command:"+command)
-    try:
-        output=subprocess.check_output(command,shell=True)
-    except:
-        print("Error deleting stack file")
-        return(False)
-    print("Output: "+str(output))
+        print("Deleting redis slaves")
+        command="kubectl delete -f redis-slaves.yaml"
+        print("Command:"+command)
+        try:
+            output=subprocess.check_output(command,shell=True)
+        except:
+            print("Error deleting stack file")
+        print("Output: "+str(output))
 
 
-    print("Deleting redis master")
-    command="kubectl delete -f redis-master.yaml"
-    print("Command:"+command)
-    try:
-        output=subprocess.check_output(command,shell=True)
-    except:
-        print("Error deleting stack file")
-        return(False)
-    print("Output: "+str(output))
+        print("Deleting redis master")
+        command="kubectl delete -f redis-master.yaml"
+        print("Command:"+command)
+        try:
+            output=subprocess.check_output(command,shell=True)
+        except:
+            print("Error deleting stack file")
+        print("Output: "+str(output))
+        c+=1
+        time.sleep(60)
+        if c > 3:
+            print("Error deleting Guestbook app")
+            return(False)
 
-def deleteEC2KeyPair(DEBUG,ec2,keypairname):
-    if DEBUG:
-        print("Attempting to delete keypair ",keypairname)
-    response = ec2.delete_key_pair(KeyName=str(keypairname))
-    if DEBUG:
-        print("Response:",response)
-    return(0)
+    return(True)
+
+
 
 
 
@@ -149,6 +102,8 @@ args = parser.parse_args()
 HOMEDIR=os.getenv("HOME")
 
 ec2 = boto3.client('ec2')
+cf= boto3.client('cloudformation')
+eks = boto3.client('eks')
 
 DEBUG=False
 if args.debug:
@@ -193,7 +148,7 @@ if AGENTS:
 
 
 if APPS:
-    if deletingGuestbook() == False:
+    if deletingGuestbook(DEBUG) == False:
         exit(-1)
 
 ipaddrs=listEC2InstanceIPaddresses(ec2,args.eksclustername[0],args.wngname[0])
@@ -203,18 +158,43 @@ if AGENTS:
         exit(-1)
 
 if WORKERS:
-    if deleteStack(args.wngstackname[0]) == False:
+    retval=jawa.deleteCFStack(DEBUG,cf,str(args.wngstackname[0]))
+    if retval == True:
+        print("Successfully deleted the CloudFoundation stack",str(args.wngstackname[0]))
+    elif retval== None:
+        print("Could not delete the CloudFoundation stack",str(args.wngstackname[0]),"since it does not exist")
+    else:
+        print("Error deleting the CloudFoundation stack",str(args.wngstackname[0]))
         exit(-1)
 
 if EKSCLUSTER:
-    if deleteEKS(args.eksclustername[0]) == False:
+    retval=jawa.deleteEKS(DEBUG,eks,args.eksclustername[0])
+    if retval == True:
+        print("Successfully deleted the EKS cluster",str(args.eksclustername[0]))
+    elif retval== None:
+        print("Could not delete the EKS cluster",str(args.eksclustername[0]),"since it does not exist")
+    else:
+        print("Error deleting the EKS cluster",str(args.eksclustername[0]))
         exit(-1)
+
 
 if VPCSTACK:
-    if deleteStack(args.stackname[0]) == False:
+    retval=jawa.deleteCFStack(DEBUG,cf,args.stackname[0])
+    if retval == True:
+        print("Successfully deleted the CloudFoundation stack",str(args.stackname[0]))
+    elif retval== None:
+        print("Could not delete the CloudFoundation stack",str(args.stackname[0]),"since it does not exist")
+    else:
+        print("Error deleting the CloudFoundation stack",str(args.stackname[0]))
         exit(-1)
+
 
 if KEYPAIR:
-    if deleteEC2KeyPair(DEBUG,ec2,args.ec2keypairname[0]) == False:
+    retval=jawa.deleteEC2KeyPair(DEBUG,ec2,args.ec2keypairname[0])
+    if retval == True:
+        print("Successfully deleted the EC2 keypair",str(args.ec2keypairname[0]))
+    elif retval== None:
+        print("Could not delete the EC2 keypair",str(args.ec2keypairname[0]),"since it does not exist")
+    else:
+        print("Error deleting the EC2 keypair",str(args.ec2keypairname[0]))
         exit(-1)
-

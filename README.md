@@ -15,6 +15,7 @@ Your workstation should be Linux, since this has not been tested on Windows.  Do
   * Install aws-iam-authenticator from https://docs.aws.amazon.com/eks/latest/userguide/install-aws-iam-authenticator.html
   * Install aws cli from https://aws.amazon.com/cli/
   * Install AWS Python library: pip install boto3
+  * Install Kubernetes Python library: pip install kubernetes
   * Update your shell profile with ``` export KUBECONFIG=~/.kube/kube-config-eks ```
   * Make sure this is in your shell profile 
 
