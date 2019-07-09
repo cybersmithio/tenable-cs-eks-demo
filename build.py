@@ -278,36 +278,42 @@ def testAWSConnectivity(DEBUG,eksclustername):
     if DEBUG:
         print("Output: "+str(output))
 
-def deployGuestbook():
+def deployGuestbook(DEBUG,namespace="default"):
     print("Deploying redis master")
-    command="kubectl apply -f redis-master.yaml"
-    print("Command:"+command)
+    command="kubectl apply -f redis-master.yaml --namespace="+str(namespace)
+
+    if DEBUG:
+        print("Command:"+command)
     try:
         output=subprocess.check_output(command,shell=True)
     except:
         print("Error creating stack file")
         return(False)
-    print("Output: "+str(output))
+    if DEBUG:
+        print("Output: "+str(output))
 
     print("Deploying redis slaves")
-    command="kubectl apply -f redis-slaves.yaml"
-    print("Command:"+command)
+    command="kubectl apply -f redis-slaves.yaml --namespace="+str(namespace)
+    if DEBUG:
+        print("Command:"+command)
     try:
         output=subprocess.check_output(command,shell=True)
     except:
         print("Error creating stack file")
         return(False)
-    print("Output: "+str(output))
+    if DEBUG:
+        print("Output: "+str(output))
 
     print("Deploying guestbook frontend")
-    command="kubectl apply -f guestbook-frontend.yaml"
+    command="kubectl apply -f guestbook-frontend.yaml --namespace="+str(namespace)
     print("Command:"+command)
     try:
         output=subprocess.check_output(command,shell=True)
     except:
         print("Error creating stack file")
         return(False)
-    print("Output: "+str(output))
+    if DEBUG:
+        print("Output: "+str(output))
 
 
 def displayPublicURLs(DEBUG,ec2):
@@ -362,6 +368,7 @@ parser.add_argument('--eksrole', help="The name of the EKS role used in the EKS 
 parser.add_argument('--stackname', help="The name of the stack ",nargs=1,action="store",default=["tenable-eks-cs-demo-stack"])
 parser.add_argument('--stackyamlfile', help="The YAML file defining the stack ",nargs=1,action="store",default=[None])
 parser.add_argument('--eksclustername', help="The name of the EKS cluster",nargs=1,action="store",default=["tenable-eks-cs-demo-eks-cluster"])
+parser.add_argument('--namespace', help="The Kubernetes namespace into which all the objects will be deployed",nargs=1,action="store",default=["tenable-eks-cs-demo"])
 parser.add_argument('--wngstackname', help="The name of the worker node group stack",nargs=1,action="store",default=["tenable-eks-cs-demo-worker-nodes"])
 parser.add_argument('--wngname', help="The name of the worker node group",nargs=1,action="store",default=["tenable-eks-cs-demo-worker-nodegroup"])
 parser.add_argument('--wngyamlfile', help="The YAML file defining the workernodegroup ",nargs=1,action="store",default=[None])
@@ -384,11 +391,12 @@ cf= boto3.client('cloudformation')
 eks = boto3.client('eks')
 iam = boto3.client('iam')
 
-
+namespace=args.namespace[0]
 if args.debug:
     DEBUG=True
 
 mkdirs(DEBUG,HOMEDIR)
+
 
 if args.existingkeypair:
     if jawa.existingEC2KeyPair(DEBUG,ec2,args.ec2keypairname[0]):
@@ -459,7 +467,6 @@ if args.only[0] == None or args.only[0]=="agents":
         exit(-1)
 
 
-
 #Execute steps
 if args.only[0] == None or args.only[0]=="keypair":
     if jawa.createEC2KeyPair(DEBUG,ec2,args.ec2keypairname[0],args.sshprivatekey[0]) == False:
@@ -496,6 +503,12 @@ if args.only[0] == None or args.only[0]=="eks":
     if args.only[0] == "eks":
         exit(0)
 
+
+
+if args.only[0] == None or args.only[0]=="namespace":
+    jkl.createNamespace(DEBUG,str(namespace))
+
+
 if args.only[0] == None or args.only[0]=="nodegroup":
     #Create CloudFormation stack for worker node group
     subnetstr=""
@@ -520,6 +533,8 @@ if args.only[0] == None or args.only[0]=="nodegroup":
 
 ipaddrs=listEC2InstanceIPaddresses(DEBUG,ec2,args.eksclustername[0],args.wngname[0])
 
+
+
 if args.only[0] == None or args.only[0]=="agents":
     print("Installing Nessus Agents")
     installNessusAgent(DEBUG,args.sshprivatekey[0],args.agentkey[0],args.agentgroup[0],ipaddrs)
@@ -528,7 +543,7 @@ if args.only[0] == None or args.only[0]=="agents":
 
 if args.only[0] == None or args.only[0]=="apps":
     print("Deploying Guestbook app and Redis backend")
-    deployGuestbook()
+    deployGuestbook(DEBUG,namespace=namespace)
     while displayPublicURLs(DEBUG,ec2) == False:
         print("No public URLs available yet...waiting 30 seconds")
         time.sleep(30)
