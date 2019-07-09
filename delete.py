@@ -41,13 +41,13 @@ def removeNessusAgent(sshprivatekey,ipaddrs):
         print("Output: "+str(output))
 
 
-def deletingGuestbook(DEBUG):
+def deletingGuestbook(DEBUG,namespace):
     c=0
     output=""
 
-    while jkl.checkRunningPods(DEBUG) > 0:
+    while jkl.checkRunningPods(DEBUG,namespace) > 0:
         print("Deleting guestbook frontend")
-        command="kubectl delete -f guestbook-frontend.yaml"
+        command="kubectl delete -f guestbook-frontend.yaml --namespace="+str(namespace)
         print("Command:"+command)
         try:
             output=subprocess.check_output(command,shell=True)
@@ -56,7 +56,7 @@ def deletingGuestbook(DEBUG):
         print("Output: "+str(output))
 
         print("Deleting redis slaves")
-        command="kubectl delete -f redis-slaves.yaml"
+        command="kubectl delete -f redis-slaves.yaml --namespace="+str(namespace)
         print("Command:"+command)
         try:
             output=subprocess.check_output(command,shell=True)
@@ -66,7 +66,7 @@ def deletingGuestbook(DEBUG):
 
 
         print("Deleting redis master")
-        command="kubectl delete -f redis-master.yaml"
+        command="kubectl delete -f redis-master.yaml --namespace="+str(namespace)
         print("Command:"+command)
         try:
             output=subprocess.check_output(command,shell=True)
@@ -93,6 +93,7 @@ parser.add_argument('--debug',help="Display a **LOT** of information",action="st
 parser.add_argument('--stackname', help="The name of the stack ",nargs=1,action="store",default=["tenable-eks-cs-demo-stack"])
 parser.add_argument('--ec2keypairname', help="The name of the EC2 Key Pair ",nargs=1,action="store",default=["tenable-eks-demo-cs-keypair"])
 parser.add_argument('--eksclustername', help="The name of the EKS cluster",nargs=1,action="store",default=["tenable-eks-cs-demo-eks-cluster"])
+parser.add_argument('--namespace', help="The Kubernetes namespace into which all the objects will be deployed",nargs=1,action="store",default=["tenable-eks-cs-demo"])
 parser.add_argument('--wngstackname', help="The name of the worker node group stack",nargs=1,action="store",default=["tenable-eks-cs-demo-worker-nodes"])
 parser.add_argument('--wngname', help="The name of the worker node group",nargs=1,action="store",default=["tenable-eks-cs-demo-worker-nodegroup"])
 parser.add_argument('--sshprivatekey', help="The file name of the SSH private key on your system",nargs=1,action="store",default=[None])
@@ -104,6 +105,9 @@ HOMEDIR=os.getenv("HOME")
 ec2 = boto3.client('ec2')
 cf= boto3.client('cloudformation')
 eks = boto3.client('eks')
+
+namespace=args.namespace[0]
+
 
 DEBUG=False
 if args.debug:
@@ -148,7 +152,7 @@ if AGENTS:
 
 
 if APPS:
-    if deletingGuestbook(DEBUG) == False:
+    if deletingGuestbook(DEBUG,namespace) == False:
         exit(-1)
 
 ipaddrs=listEC2InstanceIPaddresses(ec2,args.eksclustername[0],args.wngname[0])

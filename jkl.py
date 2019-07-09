@@ -7,7 +7,7 @@ import sys
 from pprint import pprint
 import base64
 
-def checkRunningPods(DEBUG):
+def checkRunningPods(DEBUG,namespace):
     # Configs can be set in Configuration class directly or using helper utility
     config.load_kube_config()
 
@@ -21,7 +21,7 @@ def checkRunningPods(DEBUG):
 
     countpods=0
     for i in ret.items:
-        if i.metadata.namespace != "kube-system":
+        if i.metadata.namespace == namespace:
             countpods+=1
             print("%s\t%s\t%s" % (i.status.pod_ip, i.metadata.namespace, i.metadata.name))
 

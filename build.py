@@ -392,6 +392,7 @@ eks = boto3.client('eks')
 iam = boto3.client('iam')
 
 namespace=args.namespace[0]
+
 if args.debug:
     DEBUG=True
 
