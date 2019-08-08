@@ -218,7 +218,8 @@ def createEKS(DEBUG,eks,clustername,sg,subnets,rolearn):
         print("There was an error checking for an existing EKS cluster")
 
     try:
-        response = eks.create_cluster(name=str(clustername), roleArn=str(rolearn), resourcesVpcConfig={'subnetIds': subnets, 'securityGroupIds': [str(sg)], })
+        response = eks.create_cluster(name=str(clustername), version="1.12", roleArn=str(rolearn),
+                                      resourcesVpcConfig={'subnetIds': subnets, 'securityGroupIds': [str(sg)], })
     except ClientError as e:
         if e.response['Error']['Code'] == 'AlreadyExistsException':
             if DEBUG:

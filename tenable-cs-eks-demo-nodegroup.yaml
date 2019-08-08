@@ -11,7 +11,7 @@ Parameters:
   NodeImageId:
     Type: AWS::EC2::Image::Id
     Description: AMI id for the node instances.
-    Default: ami-0440e4f6b9713faf6
+    Default: ami-0a0b913ef3249b655
 
   NodeInstanceType:
     Description: EC2 instance type for the node instances
